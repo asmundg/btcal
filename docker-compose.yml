@@ -1,0 +1,4 @@
+btcal:
+  build: .
+  volumes:
+    - btcal:/usr/src/app/btcal
