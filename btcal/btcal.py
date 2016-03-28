@@ -68,6 +68,7 @@ def event_datetime(event_soup):
 
 def icalize(events):
     cal = Calendar()
+    now = arrow.get()
     cal.add('prodid', '-//Yaypython//python.org//')
     cal.add('version', '2.0')
     for header, description, url, start, end in events:
@@ -77,7 +78,7 @@ def icalize(events):
         ev.add('location', url)
         ev.add('dtstart', start.datetime)
         ev.add('dtend', end.datetime)
-        ev.add('dtstamp', start.datetime)
+        ev.add('last-modified', now.datetime)
         cal.add_component(ev)
     return cal.to_ical().decode('utf-8')
 
