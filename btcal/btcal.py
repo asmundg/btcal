@@ -4,6 +4,7 @@ from urllib import parse
 
 import arrow
 from bs4 import BeautifulSoup
+import dateutil
 from icalendar import Calendar, Event, vText
 import requests
 
@@ -58,8 +59,9 @@ def event_datetime(event_soup):
     return [arrow
             .get('{}{}{}'.format(day.rjust(2, '0'),
                                  str(month).rjust(2, '0'), time),
-                 'DDMMHH:mm', tz='Europe/Oslo')
-            .replace(year=default.year)
+                 'DDMMHH:mm')
+            .replace(year=default.year,
+                     tzinfo=dateutil.tz.gettz('Europe/Oslo'))
             .to('UTC')
             for time in (start, end)]
 
