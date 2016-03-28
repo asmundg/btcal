@@ -1,5 +1,6 @@
-from datetime import timedelta
 import re
+import sys
+from urllib import parse
 
 import arrow
 from bs4 import BeautifulSoup
@@ -7,82 +8,77 @@ from icalendar import Calendar, Event, vText
 import requests
 
 
+ROOT = 'https://troms.dnt.no/barnas-turlag/'
+MONTHS = ['januar', 'februar', 'mars', 'april', 'mai', 'juni', 'juli',
+          'august', 'september', 'oktober', 'november', 'desember']
+http = requests.session()
+
+
 def scrape(url):
-    return BeautifulSoup((requests.get(url).text), 'html.parser')
+    return BeautifulSoup((http.get(url).text), 'html.parser')
 
 
-class BTScraper(object):
-    root = 'http://troms.turistforeningen.no'
-
-    def get_overview(self):
-        return scrape(self.root + '/activity.php?ac_owner=183')
-
-    def get_events(self, soup):
-        return [
-            self.get_event(block)
-            for block in soup.select('.activity_list_item')]
-
-    def get_event(self, block):
-        link = block.select('.activity_list_header a')[0]
-        event = scrape(self.root + link.get('href'))
-        description = ' '.join(
-            (event.select('.activity_trip_view_ingress')[0].get_text(),
-             event.select('.activity_trip_view_content')[0].get_text()))
-        time = event_time(description)
-        return [
-            link.string,
-            description,
-            link.get('href'),
-            (event_date(block)
-             .replace(hour=time.hour, minute=time.minute, tzinfo=time.tzinfo)
-             .to('UTC'))]
-
-    def absolutify(self, url):
-        return self.root + url
+def bstext(soup, selector):
+    return ''.join(el.get_text().strip() for el in soup.select(selector))
 
 
-def event_time(event_details):
-    time = re.findall(
-        'kl\.? ([0-9]{2}[.:]?[0-9]{2})', event_details, re.MULTILINE)
-    if not time:
-        time = re.findall(
-            '[^0-9]([0-9]{2}[.:]?[0-9]{2})[^0-9]', event_details,
-            re.MULTILINE)
-    if not time:
-        time = ['00:00']
-    time = time[0].replace('.', '').replace(':', '')
-    return arrow.get(time, 'HHmm').replace(tzinfo='Europe/Oslo')
+def overview():
+    return scrape(ROOT)
 
 
-def event_date(event_summary):
-    return arrow.get(
-        ''.join(re.findall(
-            '[0-9]{2}\.[0-9]{2}\.[0-9]{4}',
-            event_summary.select(
-                '.activity_list_loc_dates b')[0].string.strip())),
-        'DD.MM.YYYY')
+def event_urls(soup):
+    return [
+        parse.urljoin(ROOT, a.get('href'))
+        for a in soup.select('a.aktivitet-item')]
+
+
+def event(url):
+    """
+    Returns (title, description, url, start, end)
+    """
+    event = scrape(url)
+    title = bstext(event, '.title')
+    description = bstext(event, '.description')
+    start, end = event_datetime(event)
+    return [title, description, url, start, end]
+
+
+def event_datetime(event_soup):
+    text = bstext(event_soup, '.content dd:nth-of-type(1)')
+    day, month_name, start, end = re.match(
+        '([0-9]+). ([a-z]+)\s+kl\. ([0-9]+:[0-9]+)\s+- ([0-9]+:[0-9]+)', text,
+        re.MULTILINE).groups()
+    month = MONTHS.index(month_name) + 1
+    default = arrow.get()
+
+    # Next year
+    if month < default.month:
+        default.replace(month=default.month + 1)
+
+    return [arrow
+            .get('{}{}{}'.format(day.rjust(2, '0'),
+                                 str(month).rjust(2, '0'), time),
+                 'DDMMHH:mm', tz='Europe/Oslo')
+            .replace(year=default.year)
+            .to('UTC')
+            for time in (start, end)]
 
 
 def icalize(events):
     cal = Calendar()
     cal.add('prodid', '-//Yaypython//python.org//')
     cal.add('version', '2.0')
-    for header, description, url, date in events:
+    for header, description, url, start, end in events:
         ev = Event()
         ev.add('summary', vText(header))
         ev.add('description', vText(description))
         ev.add('location', url)
-        ev.add('dtstart', date.datetime)
-        ev.add('dtend', date.replace(seconds=60 * 60).datetime)
-        ev.add('dtstamp', date.datetime)
+        ev.add('dtstart', start.datetime)
+        ev.add('dtend', end.datetime)
+        ev.add('dtstamp', start.datetime)
         cal.add_component(ev)
-    return cal.to_ical()
+    return cal.to_ical().decode('utf-8')
 
 
 def main():
-    scraper = BTScraper()
-    print(
-        icalize(
-            [header, description, scraper.absolutify(url), date]
-            for header, description, url, date in scraper.get_events(
-                scraper.get_overview())))
+    sys.stdout.write(icalize(event(url) for url in event_urls(overview())))
