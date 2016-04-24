@@ -1,3 +1,4 @@
+import logging
 import re
 import sys
 from urllib import parse
@@ -38,23 +39,31 @@ def event(url):
     Returns (title, description, url, start, end)
     """
     event = scrape(url)
-    title = bstext(event, '.title')
-    description = bstext(event, '.description')
-    start, end = event_datetime(event)
-    return [title, description, url, start, end]
+    try:
+        title = bstext(event, '.title')
+        description = bstext(event, '.description')
+        start, end = event_datetime(
+            bstext(event, '.content dd:nth-of-type(1)'))
+        return [title, description, url, start, end]
+    except:
+        logging.error('Failed to parse: {}'.format(event))
 
 
-def event_datetime(event_soup):
-    text = bstext(event_soup, '.content dd:nth-of-type(1)')
-    day, month_name, start, end = re.match(
-        '([0-9]+). ([a-z]+)\s+kl\. ([0-9]+:[0-9]+)\s+- ([0-9]+:[0-9]+)', text,
-        re.MULTILINE).groups()
+def event_datetime(text):
+    # 25. mai kl. 08:00( - 10:00)
+    groups = re.match(
+        '\s*([0-9]+)\. ([a-z]+)\s+kl\. ([0-9]+:[0-9]+)(?:\s*-\s*([0-9]+:[0-9]+))?',
+        text, re.MULTILINE).groups()
+    day, month_name, start, end = groups
+    if end is None:
+        end = start
+
     month = MONTHS.index(month_name) + 1
     default = arrow.get()
 
     # Next year
     if month < default.month:
-        default.replace(month=default.month + 1)
+        default = default.replace(year=default.year + 1)
 
     return [arrow
             .get('{}{}{}'.format(day.rjust(2, '0'),
@@ -84,4 +93,7 @@ def icalize(events):
 
 
 def main():
-    sys.stdout.write(icalize(event(url) for url in event_urls(overview())))
+    logging.basicConfig()
+    sys.stdout.write(
+        icalize((ev for ev in (
+            event(url) for url in event_urls(overview())) if ev is not None)))
